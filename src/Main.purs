@@ -1,74 +1,91 @@
-module Main where
+module Main
+  ( MujEnum
+  , Tile
+  , World
+  , draw
+  , height
+  , initial
+  , isWall
+  , main
+  , reactor
+  , width
+  )
+  where
+
 
 import Prelude
-import Data.Array (replicate)
-import Data.Grid (Coordinates, Grid, construct)
 
+import Data.Grid (Grid, Coordinates)
+import Data.Grid as Grid
+import Data.Maybe (Maybe(..))
 import Effect (Effect)
-import Reactor (Reactor, dimensions, executeDefaultBehavior, getW, runReactor, updateW_)
+
+
+import Reactor (Reactor, executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
 import Reactor.Graphics.Colors as Color
-import Reactor.Graphics.Drawing (Drawing, fill, tile)
-
+import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
 import Reactor.Reaction (Reaction)
 
 
-data Cell = Wall | Empty
+width :: Int
+width = 12
 
-type World = {
-  board :: Grid Cell,
-  items :: Array (Array Cell),
-  player :: Coordinates
-}
+height :: Int
+height = 11
+
+main :: Effect Unit
+main = runReactor reactor { title: "Bomberman", width, height }
+
+data Tile = Wall | Empty
 
 data MujEnum
   = Up | Down | Right | Left
 
-width :: Int
-width = 20
-height :: Int
-height = 20
+derive instance tileEq :: Eq Tile
 
-main :: Effect Unit
-main = runReactor reactor { title: "Moving Dot", width, height}
+type World = { player :: Coordinates, board :: Grid Tile }
+
+isWall :: Coordinates -> Boolean
+isWall { x, y } = x == 0 || x == (width - 1) || y == 0 || y == (height - 1)
 
 reactor :: Reactor World
 reactor = { initial, draw, handleEvent, isPaused: const true }
 
 initial :: World
-initial = let 
-  board = construct width height (\cords -> Empty)
-  items = replicate height $ replicate width Empty in 
-  {board, items, player: { x: 0, y: 0 }}
+initial = { player: { x: width / 2, y: height / 2 }, board }
+  where
+  board = Grid.construct width height (\point -> if isWall point then Wall else Empty)
 
 draw :: World -> Drawing
-draw { player } = do
+draw { player, board } = do
+  drawGrid board drawTile
   fill Color.blue400 $ tile player
+  where
+  drawTile Empty = Just Color.green50
+  drawTile Wall = Just Color.gray500
 
 handleEvent :: Event -> Reaction World
-handleEvent event = 
-  do
-    { width, height } <- dimensions
-    let
-      clip a m = min (max 0 a) (m - 1)
-      bound { x, y } = { x: clip x width, y: clip y height } 
-    { player: { x, y } } <- getW
-    let
-      mojeFunkce mujEnum = 
-        case mujEnum of
-          Left -> updateW_ { player: bound { x: x - 1, y } }
-          Right -> updateW_ { player: bound { x: x + 1, y } }
-          Down -> updateW_ { player: bound { x, y: y + 1 } }
-          Up -> updateW_ { player: bound { x, y: y - 1 } }
-    case event of
-      KeyPress { key: "ArrowLeft" } -> mojeFunkce Left
-      KeyPress { key: "ArrowRight" } -> mojeFunkce Right
-      KeyPress { key: "ArrowDown" } -> mojeFunkce Down
-      KeyPress { key: "ArrowUp" } -> mojeFunkce Up
-      _ -> executeDefaultBehavior
-        
-      
-    
+handleEvent event = do
+
+  let
+    movePlayer enum = do
+      { player: { x, y }, board } <- getW
+      let newPlayerPosition = case enum of
+            Left -> { x: x -1, y: y}
+            Right -> { x: x + 1, y: y}
+            Down -> { x: x, y: y + 1}
+            Up -> { x: x, y: y - 1}
+      when (isEmpty newPlayerPosition board) $
+        updateW_ { player: newPlayerPosition }
+      where
+      isEmpty position board = Grid.index board position == Just Empty
 
 
-
+  case event of
+    KeyPress { key: "ArrowLeft" } -> movePlayer Left
+    KeyPress { key: "ArrowRight" } -> movePlayer Right
+    KeyPress { key: "ArrowDown" } -> movePlayer Down
+    KeyPress { key: "ArrowUp" } -> movePlayer Up
+    --Tick{} -> movePlayer Up
+    _ -> executeDefaultBehavior
