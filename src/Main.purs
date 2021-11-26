@@ -19,7 +19,7 @@ import Data.Grid (Grid, Coordinates)
 import Data.Grid as Grid
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
-
+import  Data.EuclideanRing
 
 import Reactor (Reactor, executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
@@ -29,10 +29,10 @@ import Reactor.Reaction (Reaction)
 
 
 width :: Int
-width = 12
+width = 10
 
 height :: Int
-height = 11
+height = 12
 
 main :: Effect Unit
 main = runReactor reactor { title: "Bomberman", width, height }
@@ -47,7 +47,21 @@ derive instance tileEq :: Eq Tile
 type World = { player :: Coordinates, board :: Grid Tile }
 
 isWall :: Coordinates -> Boolean
-isWall { x, y } = x == 0 || x == (width - 1) || y == 0 || y == (height - 1)
+isWall { x, y } = 
+  let 
+    bool1 = (x == 0 || x == (width - 1) || y == 0 || y == (height - 1)) -- borders
+    bool2 = if (width  `mod` 2 /= 0) then x `mod` 2 == 0 else --  <- jeto lichý
+      let comparison = compare x (width / 2) in 
+      case comparison of
+      LT -> x `mod` 2 == 0
+      _ -> (x - 1) `mod` 2 == 0 
+    bool3 = if (height `mod` 2 /= 0) then y `mod` 2 == 0 else --  <- jeto lichý
+      let comparison = compare y (height / 2) in 
+      case comparison of
+      LT -> y `mod` 2 == 0
+      _ -> (y - 1) `mod` 2 == 0                                                              
+  in
+    bool1 || bool2 && bool3
 
 reactor :: Reactor World
 reactor = { initial, draw, handleEvent, isPaused: const true }
