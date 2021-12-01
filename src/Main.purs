@@ -15,28 +15,29 @@ module Main
   where
 
 
-import Prelude
+import Prelude (class Eq, Unit, bind, const, discard, mod, negate, not, when, ($), (&&), (+), (-), (/), (/=), (<), (==), (>=), (||))
+
 import Data.Grid (Grid, Coordinates)
 import Data.Grid as Grid
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Reactor (Reactor, executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
-import Reactor.Graphics.Colors as Color
+import Reactor.Graphics.Colors (blue400, gray300, green600, yellow700)
 import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
 import Reactor.Reaction (Reaction)
 
 
 width :: Int
-width = 15
+width = 42
 
 height :: Int
-height = 14
+height = 18
 
 main :: Effect Unit
 main = runReactor reactor { title: "Bomberman", width, height }
 
-data Tile = Wall | Empty
+data Tile = Wall |Box| Empty
 
 derive instance tileEq :: Eq Tile
 type World = { player :: Coordinates, board :: Grid Tile }
@@ -56,14 +57,18 @@ isWall { x, y } =
       if (height `mod` 2 /= 0) then 
         y `mod` 2 == 0 
       else 
-        evenWallPlacement (y < (height / 2)) y
-    
-      -- if (height  `mod` 2 /= 0) then y `mod` 2 == 0 else
-        -- case compare y (height / 2) of
-        -- LT -> y `mod` 2 == 0
-        -- _ -> (y - 1) `mod` 2 == 0                                                              
+        evenWallPlacement (y < (height / 2)) y                                                          
   in
     isBorder || (isHorizontalWall && isVerticalWall)
+
+isBox :: Coordinates -> Boolean
+isBox { x, y } = let
+  leftTopCorn = (x < 3 && y < 3)
+  rightTopCorn = (x >= width - 3 && y < 3)
+  leftBottomCorn = (x < 3 && y >= height - 3)
+  rightBottomCorn = (x >= width - 3  && y >= height - 3)
+  in
+    not  (leftTopCorn || rightTopCorn || leftBottomCorn || rightBottomCorn)
 
 evenWallPlacement :: Boolean -> Int -> Boolean
 evenWallPlacement true currentIndex = currentIndex `mod` 2 == 0
@@ -73,17 +78,21 @@ reactor :: Reactor World
 reactor = { initial, draw, handleEvent, isPaused: const true }
 
 initial :: World
-initial = { player: { x: width / 2, y: height / 2 }, board }
+initial = { player: { x:1, y: 1 }, board }
   where
-  board = Grid.construct width height (\point -> if isWall point then Wall else Empty)
+  board = Grid.construct width height setTile
+
+setTile :: { x :: Int, y :: Int} -> Tile
+setTile point = if isWall point then Wall else if isBox point then Box else Empty
 
 draw :: World -> Drawing
 draw { player, board } = do
   drawGrid board drawTile
-  fill Color.blue400 $ tile player
+  fill blue400 $ tile player
   where
-  drawTile Empty = Just Color.green50
-  drawTile Wall = Just Color.gray500
+  drawTile Empty = Just green600
+  drawTile Wall = Just gray300
+  drawTile Box = Just yellow700
 
 handleEvent :: Event -> Reaction World
 handleEvent event = do
