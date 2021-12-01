@@ -1,12 +1,14 @@
 module Main
-  ( MujEnum
-  , Tile
+  ( Tile
   , World
   , draw
+  , evenWallPlacement
+  , handleEvent
   , height
   , initial
   , isWall
   , main
+  , movePlayer
   , reactor
   , width
   )
@@ -14,13 +16,10 @@ module Main
 
 
 import Prelude
-
 import Data.Grid (Grid, Coordinates)
 import Data.Grid as Grid
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
-import  Data.EuclideanRing
-
 import Reactor (Reactor, executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
 import Reactor.Graphics.Colors as Color
@@ -29,39 +28,46 @@ import Reactor.Reaction (Reaction)
 
 
 width :: Int
-width = 10
+width = 15
 
 height :: Int
-height = 12
+height = 14
 
 main :: Effect Unit
 main = runReactor reactor { title: "Bomberman", width, height }
 
 data Tile = Wall | Empty
 
-data MujEnum
-  = Up | Down | Right | Left
-
 derive instance tileEq :: Eq Tile
-
 type World = { player :: Coordinates, board :: Grid Tile }
 
 isWall :: Coordinates -> Boolean
 isWall { x, y } = 
   let 
-    bool1 = (x == 0 || x == (width - 1) || y == 0 || y == (height - 1)) -- borders
-    bool2 = if (width  `mod` 2 /= 0) then x `mod` 2 == 0 else --  <- jeto lichý
-      let comparison = compare x (width / 2) in 
-      case comparison of
-      LT -> x `mod` 2 == 0
-      _ -> (x - 1) `mod` 2 == 0 
-    bool3 = if (height `mod` 2 /= 0) then y `mod` 2 == 0 else --  <- jeto lichý
-      let comparison = compare y (height / 2) in 
-      case comparison of
-      LT -> y `mod` 2 == 0
-      _ -> (y - 1) `mod` 2 == 0                                                              
+    isBorder = (x == 0 || x == (width - 1) || y == 0 || y == (height - 1)) -- borders
+    
+    isHorizontalWall = 
+      if (width  `mod` 2 /= 0) then 
+        x `mod` 2 == 0 
+      else 
+        evenWallPlacement (x < (width / 2)) x
+      
+    isVerticalWall = 
+      if (height `mod` 2 /= 0) then 
+        y `mod` 2 == 0 
+      else 
+        evenWallPlacement (y < (height / 2)) y
+    
+      -- if (height  `mod` 2 /= 0) then y `mod` 2 == 0 else
+        -- case compare y (height / 2) of
+        -- LT -> y `mod` 2 == 0
+        -- _ -> (y - 1) `mod` 2 == 0                                                              
   in
-    bool1 || bool2 && bool3
+    isBorder || (isHorizontalWall && isVerticalWall)
+
+evenWallPlacement :: Boolean -> Int -> Boolean
+evenWallPlacement true currentIndex = currentIndex `mod` 2 == 0
+evenWallPlacement _ currentIndex = (currentIndex - 1) `mod` 2 == 0
 
 reactor :: Reactor World
 reactor = { initial, draw, handleEvent, isPaused: const true }
@@ -81,25 +87,32 @@ draw { player, board } = do
 
 handleEvent :: Event -> Reaction World
 handleEvent event = do
-
-  let
-    movePlayer enum = do
-      { player: { x, y }, board } <- getW
-      let newPlayerPosition = case enum of
-            Left -> { x: x -1, y: y}
-            Right -> { x: x + 1, y: y}
-            Down -> { x: x, y: y + 1}
-            Up -> { x: x, y: y - 1}
-      when (isEmpty newPlayerPosition board) $
-        updateW_ { player: newPlayerPosition }
-      where
-      isEmpty position board = Grid.index board position == Just Empty
-
-
   case event of
-    KeyPress { key: "ArrowLeft" } -> movePlayer Left
-    KeyPress { key: "ArrowRight" } -> movePlayer Right
-    KeyPress { key: "ArrowDown" } -> movePlayer Down
-    KeyPress { key: "ArrowUp" } -> movePlayer Up
+    KeyPress { key: "ArrowLeft" } -> movePlayer {xDiff: -1, yDiff: 0}
+    KeyPress { key: "ArrowRight" } -> movePlayer {xDiff: 1, yDiff: 0}
+    KeyPress { key: "ArrowDown" } -> movePlayer {xDiff: 0, yDiff: 1}
+    KeyPress { key: "ArrowUp" } -> movePlayer {xDiff: 0, yDiff: -1}
     --Tick{} -> movePlayer Up
     _ -> executeDefaultBehavior
+
+movePlayer :: {xDiff :: Int, yDiff :: Int} -> Reaction World
+movePlayer {xDiff, yDiff} = do
+  {player: { x, y }, board } <- getW
+  let newPlayerPosition = { x: x + xDiff, y: y + yDiff}
+  when (isEmpty newPlayerPosition board) $
+    updateW_ { player: newPlayerPosition }
+  where
+  isEmpty position board = Grid.index board position == Just Empty
+
+-- movePlayer direction = do
+--   { player: { x, y }, board } <- getW
+--   let newPlayerPosition = case direction of
+--         Left -> { x: x -1, y: y}
+--         Right -> { x: x + 1, y: y}
+--         Down -> { x: x, y: y + 1}
+--         Up -> { x: x, y: y - 1}
+--   when (isEmpty newPlayerPosition board) $
+--     updateW_ { player: newPlayerPosition }
+--   where
+--   isEmpty position board = Grid.index board position == Just Empty
+
