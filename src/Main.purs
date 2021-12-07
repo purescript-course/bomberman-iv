@@ -15,29 +15,38 @@ module Main
   where
 
 
-import Prelude (class Eq, Unit, bind, const, discard, mod, negate, not, when, ($), (&&), (+), (-), (/), (/=), (<), (==), (>=), (||))
+import Data.Array
+import Debug
+import Prelude
+import Reactor.Graphics.Colors
 
+import Data.Array (modifyAt)
 import Data.Grid (Grid, Coordinates)
 import Data.Grid as Grid
+import Data.Int.Bits (xor)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Reactor (Reactor, executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
-import Reactor.Graphics.Colors (blue400, gray300, green600, yellow700)
 import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
 import Reactor.Reaction (Reaction)
-
+import Web.HTML.Event.BeforeUnloadEvent.EventTypes (beforeunload)
+import Web.HTML.Event.EventTypes (offline)
 
 width :: Int
-width = 42
+width = 18
+
 
 height :: Int
 height = 18
 
+timer :: Int
+timer = 3
+
 main :: Effect Unit
 main = runReactor reactor { title: "Bomberman", width, height }
 
-data Tile = Wall |Box| Empty
+data Tile = Wall | Box | Bomb{time :: Int}| Empty
 
 derive instance tileEq :: Eq Tile
 type World = { player :: Coordinates, board :: Grid Tile }
@@ -83,7 +92,10 @@ initial = { player: { x:1, y: 1 }, board }
   board = Grid.construct width height setTile
 
 setTile :: { x :: Int, y :: Int} -> Tile
-setTile point = if isWall point then Wall else if isBox point then Box else Empty
+setTile point = 
+  if isWall point then Wall 
+  else if isBox point then Box 
+  else Empty
 
 draw :: World -> Drawing
 draw { player, board } = do
@@ -91,19 +103,49 @@ draw { player, board } = do
   fill blue400 $ tile player
   where
   drawTile Empty = Just green600
+  drawTile (Bomb{time}) = if time >= (timer / 3) then Just blue600 else Just red600 -- klidně to můžem modulem udělat blikací
   drawTile Wall = Just gray300
   drawTile Box = Just yellow700
 
 handleEvent :: Event -> Reaction World
 handleEvent event = do
+  {player: { x, y }, board } <- getW
   case event of
-    KeyPress { key: "ArrowLeft" } -> movePlayer {xDiff: -1, yDiff: 0}
-    KeyPress { key: "ArrowRight" } -> movePlayer {xDiff: 1, yDiff: 0}
-    KeyPress { key: "ArrowDown" } -> movePlayer {xDiff: 0, yDiff: 1}
-    KeyPress { key: "ArrowUp" } -> movePlayer {xDiff: 0, yDiff: -1}
+    KeyPress { key: "ArrowLeft" } -> do
+      movePlayer {xDiff: -1, yDiff: 0}
+      tickBombs
+    KeyPress { key: "ArrowRight" } -> do 
+      movePlayer {xDiff: 1, yDiff: 0}
+      tickBombs
+    KeyPress { key: "ArrowDown" } -> do 
+      movePlayer {xDiff: 0, yDiff: 1}
+      tickBombs
+    KeyPress { key: "ArrowUp" } -> do 
+      movePlayer {xDiff: 0, yDiff: -1}
+      tickBombs
+    KeyPress { key: " " } -> do 
+      let bumbac = Grid.updateAt' {x,y} (Bomb{time: timer - 1}) board  --idk proč -1 ale takhle to tikne právě 3x, což je timer, idk...
+      tickBombs
+      updateW_ {board: bumbac}
     --Tick{} -> movePlayer Up
     _ -> executeDefaultBehavior
 
+
+tickBombs = tickBombss 0 0
+tickBombss x y = do
+  --scrollování řádkama
+  let yy = if x == width - 1 then y + 1 else y
+  let xx = if x == width - 1 then 0 else x
+
+  { board } <- getW
+  case Grid.index board {x: xx, y:yy} of
+    Nothing -> executeDefaultBehavior -- vlastně default case v rekurzi, ono to vrátí nothing když jsem out of bounds
+    Just a -> case a of
+      Bomb{time} -> do 
+        let sakumprask = if time == 0 then Grid.updateAt' {x: xx,y: yy} Empty board else Grid.updateAt' {x: xx,y: yy} (Bomb{time: time - 1}) board
+        updateW_ {board: sakumprask}
+        tickBombss (xx + 1) yy
+      _ -> tickBombss (xx + 1) yy -- checkne celý grid
 movePlayer :: {xDiff :: Int, yDiff :: Int} -> Reaction World
 movePlayer {xDiff, yDiff} = do
   {player: { x, y }, board } <- getW
