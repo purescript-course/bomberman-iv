@@ -20,7 +20,7 @@ module Main
 
 
 import Prelude (class Eq, Unit, bind, const, discard, mod, negate, not, otherwise, when, ($), (&&), (+), (-), (/), (/=), (<), (<$>), (==), (>=), (||))
-import Reactor.Graphics.Colors (blue400, blue600, gray300, green600, red600, yellow700)
+import Reactor.Graphics.Colors
 import Data.Grid (Grid, Coordinates)
 import Data.Grid as Grid
 import Data.Maybe (Maybe(..))
@@ -35,12 +35,11 @@ import Reactor.Reaction (Reaction)
 width :: Int
 width = 18
 
-
 height :: Int
 height = 18
 
 timer :: Int
-timer = 3
+timer = 12
 
 main :: Effect Unit
 main = runReactor reactor { title: "Bomberman", width, height }
@@ -67,12 +66,12 @@ isWall { x, y } =
 
 
 isBox :: Coordinates -> Boolean
-isBox { x, y } = not (x < 4 || x >= width - 4) && (y < 4 || y >= height - 4)
+isBox { x, y } = not $ (x < 4 || x >= width - 4) && (y < 4 || y >= height - 4)
 
 
 evenWallPlacement :: Boolean -> Int -> Boolean
 evenWallPlacement true currentIndex = currentIndex `mod` 2 == 0
-evenWallPlacement _ currentIndex = (currentIndex - 1) `mod` 2 == 0
+evenWallPlacement false currentIndex = (currentIndex - 1) `mod` 2 == 0
 
 reactor :: Reactor World
 reactor = { initial, draw, handleEvent, isPaused: const true }
@@ -94,42 +93,39 @@ draw { player, board } = do
   fill blue400 $ tile player
   where
   drawTile Empty = Just green600
-  drawTile (Bomb{time}) = if time >= (timer / 3) then Just blue600 else Just red600 -- klidně to můžem modulem udělat blikací
+  drawTile (Bomb{time}) = if time - 1 >= timer / 3 then Just gray600 else Just red600 -- use mod for flickering
   drawTile Wall = Just gray300
   drawTile Box = Just yellow700
 
 handleEvent :: Event -> Reaction World
 handleEvent event = do
   {player: { x, y }, board } <- getW
+  let bombsTicked = bombTick <$> board
+  
   case event of
     KeyPress { key: "ArrowLeft" } -> do
       movePlayer {xDiff: -1, yDiff: 0}
-      let bumbac = bombTick <$> board
-      updateW_{board: bumbac}
+      updateW_{board: bombsTicked}
     KeyPress { key: "ArrowRight" } -> do 
       movePlayer {xDiff: 1, yDiff: 0}
-      let bumbac = bombTick <$> board
-      updateW_{board: bumbac}
+      updateW_{board: bombsTicked}
     KeyPress { key: "ArrowDown" } -> do 
       movePlayer {xDiff: 0, yDiff: 1}
-      let bumbac = bombTick <$> board
-      updateW_{board: bumbac}
+      updateW_{board: bombsTicked}
     KeyPress { key: "ArrowUp" } -> do 
       movePlayer {xDiff: 0, yDiff: -1}
-      let bumbac = bombTick <$> board
-      updateW_{board: bumbac}
+      updateW_{board: bombsTicked}
     KeyPress { key: " " } -> do 
-      let placeBomb = Grid.updateAt' {x,y} (Bomb{time: timer}) board 
-      let bumbac = bombTick <$> placeBomb
-      updateW_{board: bumbac}
+      let bombPlanted = Grid.updateAt' {x,y} (Bomb{time: timer}) bombsTicked 
+      updateW_{board: bombPlanted}
     --Tick{} -> movePlayer Up
     _ -> executeDefaultBehavior
 
 bombTick :: Tile -> Tile
 bombTick (Bomb {time})
-  |time == 0 = Empty
+  |time == 1 = Empty
   |otherwise = Bomb {time: time - 1}
-bombTick t = t
+bombTick tile = tile
 
 movePlayer :: {xDiff :: Int, yDiff :: Int} -> Reaction World
 movePlayer {xDiff, yDiff} = do
