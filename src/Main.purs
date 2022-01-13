@@ -24,7 +24,7 @@ import Data.Grid
 import Data.List
 import Data.Maybe
 import Data.Tuple
-import Debug
+
 import Effect.Random
 import Prelude
 import Prelude
@@ -35,6 +35,7 @@ import Data.Enum (downFrom)
 import Data.Grid as Grid
 import Data.HeytingAlgebra.Generic (genericDisj)
 import Data.List as List
+import Data.List ((:), null)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Halogen.HTML (elementNS)
@@ -129,21 +130,30 @@ handleEvent event = do
     KeyPress { key: " " } -> do 
       let bombPlanted = Grid.updateAt' {x,y} (Bomb{time: timer}) board 
       updateW_{board: bombPlanted}
-    Tick {delta: deltickaOMEGALUL} -> 
+    Tick {} -> 
       let
         bombsTicked = bombTick <$> board
+        
         fun a = let 
-                  hum = (fst a) List.: bombBoom bombsTicked (fst a) radiusConst
-                  customSetTile point = if (List.length (List.filter (_ == point) hum) > 0) then (Explosion{existTime: 120}) else fromMaybe Empty $ Grid.index bombsTicked point
-                in Grid.construct width height customSetTile
+          hum = (fst a) : bombBoom bombsTicked (fst a) radiusConst
+          
+          customSetTile point = 
+            if not null $ List.filter (_ == point) hum then 
+              Explosion {existTime: 120} 
+            else fromMaybe Empty $ Grid.index bombsTicked point
+        
+        in 
+          Grid.construct width height customSetTile
       in
         do
-          updateW_{board: bombsTicked}
-          let funk a = case (snd a) of 
+          updateW_ {board: bombsTicked}
+         
+          let funk a = case snd a of 
                 Bomb{time} -> time == 1
                 _ -> false
+          
           let listTiluuSBombou = Array.filter funk $ enumerate bombsTicked 
-          updateW_{board: fromMaybe bombsTicked (Array.head $ fun <$> listTiluuSBombou)}
+          updateW_{board: fromMaybe bombsTicked $ Array.head $ fun <$> listTiluuSBombou}
 
     _ -> executeDefaultBehavior
 
@@ -156,14 +166,14 @@ bombBoom board {x, y} radius =
     up = goUp board {x, y: y - 1} radius
     down = goDown board {x, y: y + 1} radius
   in
-    List.concat $ right List.: left List.: up List.: down List.: Nil
+    List.concat (right : left : up : down : Nil)
   where
     goRight board tile@{x, y} radius = 
       let aaa = fromMaybe Empty (Grid.index board tile) in
       case aaa of
         Wall -> Nil
-        Bomb{} -> tile List.: Nil
-        Box -> tile List.: Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
         _ ->
           if not(radius == 0 || x == 0) then 
             Cons tile (goRight board {x: x + 1, y} (radius - 1))
@@ -173,8 +183,8 @@ bombBoom board {x, y} radius =
       let aaa = fromMaybe Empty (Grid.index board tile) in
       case aaa of
         Wall -> Nil
-        Bomb{} -> tile List.: Nil
-        Box -> tile List.: Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
         _ ->
           if not(radius == 0 || x == 0) then 
             Cons tile (goLeft board {x: x - 1, y} (radius - 1))
@@ -183,8 +193,8 @@ bombBoom board {x, y} radius =
       let aaa = fromMaybe Empty (Grid.index board tile) in
       case aaa of
         Wall -> Nil
-        Bomb{} -> tile List.: Nil
-        Box -> tile List.: Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
         _ ->
           if not(radius == 0 || tile.y == 0) then 
             Cons tile (goUp board {x, y: y - 1} (radius - 1))
@@ -194,8 +204,8 @@ bombBoom board {x, y} radius =
       let aaa = fromMaybe Empty (Grid.index board tile) in
       case aaa of
         Wall -> Nil
-        Bomb{} -> tile List.: Nil
-        Box -> tile List.: Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
         _ ->
           if not(radius == 0 || y == height) then 
             Cons tile (goDown board {x, y: y + 1} (radius - 1))
