@@ -19,32 +19,48 @@ module Main
 
 
 
-import Prelude (class Eq, Unit, bind, const, discard, mod, negate, not, otherwise, when, ($), (&&), (+), (-), (/), (/=), (<), (<$>), (==), (>=), (||))
+import Data.Array
+import Data.Grid
+import Data.List
+import Data.Maybe
+import Data.Tuple
+
+import Effect.Random
+import Prelude
+import Prelude
 import Reactor.Graphics.Colors
-import Data.Grid (Grid, Coordinates)
+import Data.Array as Array
+import Color.Scheme.X11 (turquoise)
+import Data.Enum (downFrom)
 import Data.Grid as Grid
+import Data.HeytingAlgebra.Generic (genericDisj)
+import Data.List as List
+import Data.List ((:), null)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
+import Halogen.HTML (elementNS)
 import Reactor (Reactor, executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
 import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
-import Reactor.Reaction (Reaction)
+import Reactor.Reaction (Reaction, ReactionM(..))
+import Web.HTML.Event.EventTypes (offline)
 
-
+radiusConst :: Int
+radiusConst = 3
 
 width :: Int
-width = 18
+width = 8
 
 height :: Int
 height = 18
 
 timer :: Int
-timer = 12
+timer = 180
 
 main :: Effect Unit
 main = runReactor reactor { title: "Bomberman", width, height }
 
-data Tile = Wall | Box | Bomb {time :: Int}| Empty
+data Tile = Wall | Box | Bomb {time :: Int}| Explosion{existTime :: Int} | Empty
 
 derive instance tileEq :: Eq Tile
 type World = { player :: Coordinates, board :: Grid Tile }
@@ -74,7 +90,7 @@ evenWallPlacement true currentIndex = currentIndex `mod` 2 == 0
 evenWallPlacement false currentIndex = (currentIndex - 1) `mod` 2 == 0
 
 reactor :: Reactor World
-reactor = { initial, draw, handleEvent, isPaused: const true }
+reactor = { initial, draw, handleEvent, isPaused: const false }
 
 initial :: World
 initial = { player: { x:1, y: 1 }, board }
@@ -92,6 +108,7 @@ draw { player, board } = do
   drawGrid board drawTile
   fill blue400 $ tile player
   where
+  drawTile (Explosion{}) = Just blue800
   drawTile Empty = Just green600
   drawTile (Bomb{time}) = if time - 1 >= timer / 3 then Just gray600 else Just red600 -- use mod for flickering
   drawTile Wall = Just gray300
@@ -100,31 +117,103 @@ draw { player, board } = do
 handleEvent :: Event -> Reaction World
 handleEvent event = do
   {player: { x, y }, board } <- getW
-  let bombsTicked = bombTick <$> board
   
   case event of
     KeyPress { key: "ArrowLeft" } -> do
       movePlayer {xDiff: -1, yDiff: 0}
-      updateW_{board: bombsTicked}
     KeyPress { key: "ArrowRight" } -> do 
       movePlayer {xDiff: 1, yDiff: 0}
-      updateW_{board: bombsTicked}
     KeyPress { key: "ArrowDown" } -> do 
       movePlayer {xDiff: 0, yDiff: 1}
-      updateW_{board: bombsTicked}
     KeyPress { key: "ArrowUp" } -> do 
       movePlayer {xDiff: 0, yDiff: -1}
-      updateW_{board: bombsTicked}
     KeyPress { key: " " } -> do 
-      let bombPlanted = Grid.updateAt' {x,y} (Bomb{time: timer}) bombsTicked 
+      let bombPlanted = Grid.updateAt' {x,y} (Bomb{time: timer}) board 
       updateW_{board: bombPlanted}
-    --Tick{} -> movePlayer Up
+    Tick {} -> 
+      let
+        bombsTicked = bombTick <$> board
+        
+        fun a = let 
+          hum = (fst a) : bombBoom bombsTicked (fst a) radiusConst
+          
+          customSetTile point = 
+            if not null $ List.filter (_ == point) hum then 
+              Explosion {existTime: 120} 
+            else fromMaybe Empty $ Grid.index bombsTicked point
+        
+        in 
+          Grid.construct width height customSetTile
+      in
+        do
+          updateW_ {board: bombsTicked}
+         
+          let funk a = case snd a of 
+                Bomb{time} -> time == 1
+                _ -> false
+          
+          let listTiluuSBombou = Array.filter funk $ enumerate bombsTicked 
+          updateW_{board: fromMaybe bombsTicked $ Array.head $ fun <$> listTiluuSBombou}
+
     _ -> executeDefaultBehavior
 
+
+bombBoom ∷ Grid Tile → { x ∷ Int , y ∷ Int } → Int → List { x ∷ Int , y ∷ Int }
+bombBoom board {x, y} radius =
+  let 
+    right = goRight board {x: x + 1, y} radius
+    left = goLeft board {x: x - 1, y} radius
+    up = goUp board {x, y: y - 1} radius
+    down = goDown board {x, y: y + 1} radius
+  in
+    List.concat (right : left : up : down : Nil)
+  where
+    goRight board tile@{x, y} radius = 
+      let aaa = fromMaybe Empty (Grid.index board tile) in
+      case aaa of
+        Wall -> Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
+        _ ->
+          if not(radius == 0 || x == 0) then 
+            Cons tile (goRight board {x: x + 1, y} (radius - 1))
+          else Nil
+
+    goLeft board tile@{x, y} radius = 
+      let aaa = fromMaybe Empty (Grid.index board tile) in
+      case aaa of
+        Wall -> Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
+        _ ->
+          if not(radius == 0 || x == 0) then 
+            Cons tile (goLeft board {x: x - 1, y} (radius - 1))
+          else Nil
+    goUp board tile@{x, y} radius = 
+      let aaa = fromMaybe Empty (Grid.index board tile) in
+      case aaa of
+        Wall -> Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
+        _ ->
+          if not(radius == 0 || tile.y == 0) then 
+            Cons tile (goUp board {x, y: y - 1} (radius - 1))
+          else Nil
+
+    goDown board tile@{x, y} radius = 
+      let aaa = fromMaybe Empty (Grid.index board tile) in
+      case aaa of
+        Wall -> Nil
+        Bomb{} -> tile : Nil
+        Box -> tile : Nil
+        _ ->
+          if not(radius == 0 || y == height) then 
+            Cons tile (goDown board {x, y: y + 1} (radius - 1))
+          else Nil
+
 bombTick :: Tile -> Tile
-bombTick (Bomb {time})
-  |time == 1 = Empty
-  |otherwise = Bomb {time: time - 1}
+bombTick (Bomb {time}) = Bomb {time: time - 1}
+bombTick (Explosion{existTime}) = if existTime < 0 then Empty else Explosion{existTime: existTime - 1}
 bombTick tile = tile
 
 movePlayer :: {xDiff :: Int, yDiff :: Int} -> Reaction World
