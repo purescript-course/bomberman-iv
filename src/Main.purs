@@ -49,7 +49,7 @@ radiusConst :: Int
 radiusConst = 3
 
 width :: Int
-width = 8
+width = 18
 
 height :: Int
 height = 18
@@ -161,55 +161,22 @@ handleEvent event = do
 bombBoom ∷ Grid Tile → { x ∷ Int , y ∷ Int } → Int → List { x ∷ Int , y ∷ Int }
 bombBoom board {x, y} radius =
   let 
-    right = goRight board {x: x + 1, y} radius
-    left = goLeft board {x: x - 1, y} radius
-    up = goUp board {x, y: y - 1} radius
-    down = goDown board {x, y: y + 1} radius
+    right = go board {x: x + 1, y} radius {xChange:1, yChange:0}
+    left = go board {x: x - 1, y} radius {xChange: -1,yChange: 0}
+    up = go board {x, y: y - 1} radius {xChange:0 ,yChange: -1}
+    down = go board {x, y: y + 1} radius {xChange:0,yChange: 1}
   in
-    List.concat (right : left : up : down : Nil)
+    right <> left <> up <> down
   where
-    goRight board tile@{x, y} radius = 
+    go board tile@{x, y} radius enum@{xChange, yChange} = 
       let aaa = fromMaybe Empty (Grid.index board tile) in
       case aaa of
         Wall -> Nil
         Bomb{} -> tile : Nil
         Box -> tile : Nil
-        _ ->
-          if not(radius == 0 || x == 0) then 
-            Cons tile (goRight board {x: x + 1, y} (radius - 1))
-          else Nil
-
-    goLeft board tile@{x, y} radius = 
-      let aaa = fromMaybe Empty (Grid.index board tile) in
-      case aaa of
-        Wall -> Nil
-        Bomb{} -> tile : Nil
-        Box -> tile : Nil
-        _ ->
-          if not(radius == 0 || x == 0) then 
-            Cons tile (goLeft board {x: x - 1, y} (radius - 1))
-          else Nil
-    goUp board tile@{x, y} radius = 
-      let aaa = fromMaybe Empty (Grid.index board tile) in
-      case aaa of
-        Wall -> Nil
-        Bomb{} -> tile : Nil
-        Box -> tile : Nil
-        _ ->
-          if not(radius == 0 || tile.y == 0) then 
-            Cons tile (goUp board {x, y: y - 1} (radius - 1))
-          else Nil
-
-    goDown board tile@{x, y} radius = 
-      let aaa = fromMaybe Empty (Grid.index board tile) in
-      case aaa of
-        Wall -> Nil
-        Bomb{} -> tile : Nil
-        Box -> tile : Nil
-        _ ->
-          if not(radius == 0 || y == height) then 
-            Cons tile (goDown board {x, y: y + 1} (radius - 1))
-          else Nil
+        _ -> if not(radius == 0) then 
+            Cons tile (go board {x: x + xChange, y: y + yChange} (radius - 1) enum)
+            else Nil
 
 bombTick :: Tile -> Tile
 bombTick (Bomb {time}) = Bomb {time: time - 1}
