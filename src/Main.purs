@@ -15,23 +15,27 @@ module Main
   where
 
 
-import Data.Grid (Coordinates, Grid, enumerate)
-import Data.Maybe (Maybe(..), fromMaybe)
-import Data.Tuple (fst, snd)
-import Effect.Random (randomInt)
-import Prelude (class Eq, Unit, bind, const, discard, mod, negate, not, otherwise, pure, when, ($), (&&), (+), (-), (/), (/=), (<), (<$>), (<>), (==), (>=), (||))
-import Reactor.Graphics.Colors
+import Prelude
+import Reactor.Graphics.Colors (blue400, gray300, gray600, green600, hsl, red600, yellow800)
+
 import Data.Array as Array
+import Data.Grid (Coordinates, Grid, enumerate)
 import Data.Grid as Grid
-import Data.List (List(..), (:), null, filter)
+import Data.Int (toNumber)
+import Data.List (List(..), (:), null, filter, head)
+import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Tuple (Tuple(..), fst, snd)
 import Effect (Effect)
+import Effect.Random (randomInt)
+import Math (sqrt, pow)
 import Reactor (executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
 import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
+import Reactor.Internal.Widget (Widget(..))
 import Reactor.Reaction (Reaction)
 
 radiusConst :: Int
-radiusConst = 3
+radiusConst = 5
 
 width :: Int
 width = 18
@@ -40,16 +44,16 @@ height :: Int
 height = 18
 
 timer :: Int
-timer = 180
+timer = 240
 
 main :: Effect Unit
 main = do
   board <- Grid.constructM width height setTile
   let initial = { player: { x:1, y: 1 }, board }
   let reactor = { initial, draw, handleEvent, isPaused: const false }
-  runReactor reactor { title: "Bomberman", width, height, widgets: [] }
+  runReactor reactor { title: "Bomberman", width, height , widgets: [Tuple "Sexy widget" (Section { title: "Sexy" })]}
 
-data Tile = Wall | Box | Bomb {time :: Int}| Explosion{existTime :: Int} | Empty
+data Tile = Wall | Box | Bomb {time :: Int}| Explosion{existTime :: Int, distance :: Int} | Empty
 
 derive instance tileEq :: Eq Tile
 type World = { player :: Coordinates, board :: Grid Tile }
@@ -72,8 +76,8 @@ isWall { x, y } =
 
 isBox :: Coordinates -> Effect Boolean
 isBox { x, y } = do
-  coin <- randomInt 0 2
-  pure $ (coin /= 0) && (not $ (x < 4 || x >= width - 4) && (y < 4 || y >= height - 4))
+  coin <- randomInt 0 4
+  pure $ coin /= 0 && (not $ (x < 4 || x >= width - 4) && (y < 4 || y >= height - 4))
 
 
 evenWallPlacement :: Boolean -> Int -> Boolean
@@ -84,24 +88,34 @@ evenWallPlacement false currentIndex = (currentIndex - 1) `mod` 2 == 0
 setTile :: { x :: Int, y :: Int} -> Effect Tile
 setTile point = do
   isBoxBool <- isBox point
-  if isWall point then 
-    pure Wall 
-  else if isBoxBool then
-    pure Box 
-  else
-    pure Empty
+  let isWallBool = isWall point
+  evaluateBools isBoxBool isWallBool
+  where
+    evaluateBools isBoxBool isWallBool
+      |isWallBool = pure Wall 
+      |isBoxBool = pure Box 
+      |otherwise = pure Empty
 
 draw :: World -> Drawing
 draw { player, board } = do
   drawGrid board drawTile
   fill blue400 $ tile player
   where
-  drawTile (Explosion{}) = Just blue800
+  drawTile (Explosion{distance}) = Just (hslVal distance)
   drawTile Empty = Just green600
-  drawTile (Bomb{time}) = if time - 1 >= timer / 3 then Just gray600 else Just red600 -- use mod for flickering
+  drawTile (Bomb{time}) = if time - 1 >= timer / 3 ||  (time - 1) `mod` 10 > 4 then Just gray600 else Just red600 -- use mod for flickering
   drawTile Wall = Just gray300
-  drawTile Box = Just yellow700
+  drawTile Box = Just yellow800
+  hslVal a = 
+          let 
+            b = toNumber a
+            exRadiusNum = toNumber radiusConst
+            division = 4.6416 / exRadiusNum
+            hue = (60.0 - sqrt (60.0 * 60.0 / exRadiusNum  * b))
+            saturation = (100.0 - ((division * b) * pow (division * b) 2.0))/100.0
+            light = (50.0 - sqrt (18.0 * 18.0 / exRadiusNum  * b))/100.0 in
 
+            hsl hue saturation light
 handleEvent :: Event -> Reaction World
 handleEvent event = do
   {player: { x, y }, board } <- getW
@@ -123,11 +137,14 @@ handleEvent event = do
         bombsTicked = bombTick <$> board
         
         fun a = let 
-          hum = (fst a) : bombBoom bombsTicked (fst a) radiusConst Nil
+          hum = bombBoom bombsTicked (fst a) radiusConst Nil
           
           customSetTile point = 
-            if not null $ filter (_ == point) hum then 
-              Explosion {existTime: 120} 
+            let explosionVal = filter (\q -> snd q == point) hum 
+                currExp = fromMaybe (Tuple 0 {x:0, y:0}) (head explosionVal)
+            in
+            if not null explosionVal then 
+              Explosion {existTime: 120, distance: fst currExp} 
             else fromMaybe Empty $ Grid.index bombsTicked point
         
         in 
@@ -146,7 +163,7 @@ handleEvent event = do
     _ -> executeDefaultBehavior
 
 
-bombBoom ∷ Grid Tile → { x ∷ Int , y ∷ Int } → Int → List { x ∷ Int , y ∷ Int } → List { x ∷ Int , y ∷ Int }
+bombBoom ∷ Grid Tile → { x ∷ Int , y ∷ Int } → Int → List { x ∷ Int , y ∷ Int } → List (Tuple Int { x ∷ Int , y ∷ Int } )
 bombBoom board {x, y} radius bombsDone =
   let 
     right = go board {x: x + 1, y} radius {xChange:1, yChange:0} bombsDone
@@ -154,21 +171,24 @@ bombBoom board {x, y} radius bombsDone =
     up = go board {x, y: y - 1} radius {xChange:0 ,yChange: -1} bombsDone
     down = go board {x, y: y + 1} radius {xChange:0,yChange: 1} bombsDone
   in
-    right <> left <> up <> down
+    (Tuple 0 {x, y}) : right <> left <> up <> down
   where
-    go board tile@{x, y} radius enum@{xChange, yChange} bombsDonee = 
-      let aaa = fromMaybe Empty (Grid.index board tile) in
+    go board_ tile@{x: expX, y: expY} radius_ enum@{xChange, yChange} bombsDonee = 
+      let aaa = fromMaybe Empty (Grid.index board_ tile) in
       case aaa of
         Wall -> Nil
-        Bomb{} -> if null $ filter (_ == tile) bombsDonee then tile : (bombBoom board tile radiusConst (tile : bombsDonee)) else Nil
-        Box -> tile : Nil
-        _ -> if not(radius == 0) then 
-            tile : (go board {x: x + xChange, y: y + yChange} (radius - 1) enum bombsDonee)
+        Bomb{} -> if null $ filter (_ == tile) bombsDonee then (Tuple 0 tile) : (bombBoom board_ tile radiusConst (tile : bombsDonee)) else Nil
+        Box -> (Tuple (distanceFromCords tile) tile) : Nil
+        _ -> if not(radius_ == 0) then 
+            (Tuple (distanceFromCords tile) tile) : (go board_ {x: expX + xChange, y: expY + yChange} (radius_ - 1) enum bombsDonee)
             else Nil
+    distanceFromCords a = absoluteValue (a.x - x) + absoluteValue (a.y - y)
+    absoluteValue i = if i < 0 then i * -1 else i
+
 
 bombTick :: Tile -> Tile
 bombTick (Bomb {time}) = Bomb {time: time - 1}
-bombTick (Explosion{existTime}) = if existTime < 0 then Empty else Explosion{existTime: existTime - 1}
+bombTick (Explosion{existTime, distance}) = if existTime < 0 then Empty else Explosion{existTime: existTime - 1, distance}
 bombTick tile = tile
 
 movePlayer :: {xDiff :: Int, yDiff :: Int} -> Reaction World
