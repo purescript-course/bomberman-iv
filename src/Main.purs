@@ -8,7 +8,7 @@ module Main
   , bombTick
   , directions
   , draw
-  , enemyRandomDirection
+  , enemyDirection
   , evenWallPlacement
   , explode
   , handleEvent
@@ -30,7 +30,6 @@ module Main
   )
   where
 
-
 import Prelude
 import Data.Array ((!!))
 import Data.Array as Array
@@ -46,7 +45,7 @@ import Effect.Random (randomInt)
 import Math (sqrt, pow)
 import Reactor (executeDefaultBehavior, getW, runReactor, updateW_)
 import Reactor.Events (Event(..))
-import Reactor.Graphics.Colors (blue400, gray300, gray600, green600, hsl, red600, yellow800)
+import Reactor.Graphics.Colors (blue400, gray300, gray600, gray500, hsl, red600, green700)
 import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
 import Reactor.Internal.Widget (Widget(..))
 import Reactor.Reaction (Reaction, ReactionM)
@@ -58,7 +57,7 @@ width :: Int
 width = 18
 
 height :: Int
-height = 15
+height = 18
 
 timer :: Int
 timer = 240
@@ -128,10 +127,10 @@ draw { player, player2: Enemy{cords}, board } = do
   fill red600 $ tile cords
   where
   drawTile (Explosion{distance}) = Just (hslVal distance)
-  drawTile Empty = Just green600
-  drawTile (Bomb{time}) = if time - 1 >= timer / 3 ||  (time - 1) `mod` 10 > 4 then Just gray600 else Just red600
-  drawTile Wall = Just gray300
-  drawTile Box = Just yellow800
+  drawTile Empty = Just gray300
+  drawTile (Bomb{time}) = if time - 1 >= timer / 3 ||  (time - 1) `mod` 10 > 4 then Just gray500 else Just red600
+  drawTile Wall = Just gray600
+  drawTile Box = Just green700
   hslVal a = 
           let 
             b = toNumber a
@@ -168,7 +167,7 @@ handleEvent event = do
           let newPlayer2 = Enemy{cords, isOnRun: Timer{running: time /= 0, time: if time /= 0 then time - 1 else time}, lastSeen}
           updateW_ {board: bombsTicked, tickCounter: tickCounter + 1, player2: newPlayer2} --just ticking all the clocks
           when (coin5 < 4) $ when (tickCounter `mod` (if running then runningSpeed else walkingSpeed) == 0 ) movePlayer2 --p = 0,8
-          if coin300 == 69 then --nice, bomb plantage
+          if coin300 == 69 then --nice; bomb plantage
             let bombPlanted = Grid.updateAt' cords (Bomb{time: timer}) board 
                 _newPlayer2 = Enemy{cords, isOnRun: Timer{running: true, time: radiusConst * runningSpeed}, lastSeen} in
               updateW_{board: bombPlanted, player2: _newPlayer2}
@@ -232,21 +231,30 @@ movePlayer {xDiff, yDiff} = do
 
 movePlayer2 :: Reaction World
 movePlayer2 = do
-  {xDiff, yDiff} <- enemyRandomDirection
-  {player2: Enemy{cords:  {x, y}, isOnRun } } <- getW
+  Tuple running {xDiff, yDiff}<- enemyDirection
+  {player2: Enemy{cords:  cords@{x, y}, isOnRun:Timer{time} } } <- getW
   let newPlayerPosition = { x: x + xDiff, y: y + yDiff}
-  updateW_ { player2: Enemy{cords: newPlayerPosition, isOnRun, lastSeen: {x, y}} }
+  updateW_ { player2: Enemy{cords: newPlayerPosition, isOnRun: Timer{running, time: if not running then 0 else time}, lastSeen: cords}}
 
-enemyRandomDirection ∷  ReactionM World { xDiff ∷ Int , yDiff ∷ Int }
-enemyRandomDirection = do
-  {board, player2: Enemy{cords: {x:x1, y:y1}, lastSeen}} <- getW
-  let possibleDirections = Array.filter (wayIsOK {x:x1, y:y1} lastSeen board) directions
-  if isEmpty lastSeen board && (Array.null possibleDirections || (isBomb <<< fromMaybe Empty $ Grid.index board {x: x1, y: y1}) {- couvání od bomb, idk -}) then
-      pure {xDiff: lastSeen.x - x1, yDiff: lastSeen.y - y1}
+
+
+enemyDirection ∷ ReactionM World (Tuple Boolean { xDiff ∷ Int , yDiff ∷ Int } )
+enemyDirection = do
+  {board, player2: Enemy{cords: cords@{x:x1, y:y1},isOnRun: Timer{running}, lastSeen}} <- getW
+  let possibleDirections = Array.filter (wayIsOK cords lastSeen board) directions
+  let possibleTurns = Array.filter (not isATurn cords lastSeen) possibleDirections
+  if running && not Array.null possibleTurns then do
+    coin <- liftEffect <<< randomInt 0 $ (Array.length possibleTurns) - 1
+    pure $ Tuple false $ fromMaybe {xDiff: 0, yDiff: 0} $ possibleTurns !! coin
+  else if isEmpty lastSeen board && (Array.null possibleDirections || (isBomb <<< fromMaybe Empty $ Grid.index board {x: x1, y: y1})) then
+      pure $ Tuple running $ {xDiff: lastSeen.x - x1, yDiff: lastSeen.y - y1}
   else do
       coin <- liftEffect <<< randomInt 0 $ (Array.length possibleDirections) - 1
-      pure $ fromMaybe {xDiff: 0, yDiff: 0} (possibleDirections !! coin)
+      pure $ Tuple running $ fromMaybe {xDiff: 0, yDiff: 0} $ possibleDirections !! coin
 
+isATurn ∷ { x ∷ Int , y ∷ Int } → { x ∷ Int , y ∷ Int } → { xDiff ∷ Int , yDiff ∷ Int } → Boolean
+isATurn {x: currX, y: currY} {x: prevX, y: prevY} {xDiff , yDiff} = 
+  {x: currX + xDiff, y: currY + yDiff} == {x: prevX, y: prevY} || {x: currX + (xDiff * -1), y: currY + (yDiff * -1)} == {x: prevX, y: prevY}
 isEmpty :: { x :: Int, y :: Int}-> Grid Tile -> Boolean
 isEmpty position board = Grid.index board position == Just Empty
 
