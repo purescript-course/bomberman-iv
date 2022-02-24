@@ -17,5 +17,8 @@
     "purs-tidy": "^0.5.2",
     "spago": "^0.20.3",
     "tailwindcss": "^2.2.15"
+  },
+  "dependencies": {
+    "purty": "^7.0.0"
   }
 }
