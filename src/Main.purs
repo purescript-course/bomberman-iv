@@ -60,10 +60,10 @@ height :: Int
 height = 18
 
 timer :: Int
-timer = 240
+timer = 200
 
 walkingSpeed ∷ Int
-walkingSpeed = 30
+walkingSpeed = 35
 runningSpeed :: Int
 runningSpeed = walkingSpeed / 3 * 2
 main :: Effect Unit
@@ -96,17 +96,14 @@ isWall { x, y } =
       | dimension `mod` 2 /= 0 = point `mod` 2 == 0 
       | otherwise = evenWallPlacement (point < (dimension / 2)) point
 
-
 isBox :: Coordinates -> Effect Boolean
 isBox { x, y } = do
   coin <- randomInt 0 4
   pure $ coin /= 0 && (not $ (x < 4 || x >= width - 4) && (y < 4 || y >= height - 4))
 
-
 evenWallPlacement :: Boolean -> Int -> Boolean
 evenWallPlacement true currentIndex = currentIndex `mod` 2 == 0
 evenWallPlacement false currentIndex = (currentIndex - 1) `mod` 2 == 0
-
 
 setTile :: { x :: Int, y :: Int} -> Effect Tile
 setTile point = do
@@ -123,7 +120,6 @@ draw :: World -> Drawing
 draw { player, player2: Enemy{cords}, board } = do
   drawGrid board drawTile
   fill blue400 $ tile player
-  
   fill red600 $ tile cords
   where
   drawTile (Explosion{distance}) = Just (hslVal distance)
@@ -162,15 +158,14 @@ handleEvent event = do
         bombsTicked = bombTick <$> board
       in
           do
-          coin300 <- liftEffect $ randomInt 0 299
-          coin5 <- liftEffect $ randomInt 0 4 --we could use one coin and check for 2 different probabilities, idk
-          let newPlayer2 = Enemy{cords, isOnRun: Timer{running: time /= 0, time: if time /= 0 then time - 1 else time}, lastSeen}
-          updateW_ {board: bombsTicked, tickCounter: tickCounter + 1, player2: newPlayer2} --just ticking all the clocks
-          when (coin5 < 4) $ when (tickCounter `mod` (if running then runningSpeed else walkingSpeed) == 0 ) movePlayer2 --p = 0,8
-          if coin300 == 69 then --nice; bomb plantage
+          coin <- liftEffect $ randomInt 0 999999 --hehe; abychom mohli použít jeden coin na více věcí, dělám to takhle.
+          let tickedPlayer2 = Enemy{cords, isOnRun: Timer{running: time /= 0, time: if time /= 0 then time - 1 else time}, lastSeen}
+          updateW_ {board: bombsTicked, tickCounter: tickCounter + 1, player2: tickedPlayer2} --just ticking all the clocks
+          when (coin `mod` 5 < 4 && tickCounter `mod` (if running then runningSpeed else walkingSpeed) == 0 ) movePlayer2 --p = 0,8
+          if coin `mod` 100 < 69 && tickCounter `mod` 300 == 0 then --p = 0,7
             let bombPlanted = Grid.updateAt' cords (Bomb{time: timer}) board 
-                _newPlayer2 = Enemy{cords, isOnRun: Timer{running: true, time: radiusConst * runningSpeed}, lastSeen} in
-              updateW_{board: bombPlanted, player2: _newPlayer2}
+                newPlayer2 = Enemy{cords, isOnRun: Timer{running: true, time: radiusConst * runningSpeed}, lastSeen} in
+              updateW_{board: bombPlanted, player2: newPlayer2}
           else
             pure unit
           {board: newBoard} <- getW --just to be sure we are working with the most recent board
@@ -183,11 +178,11 @@ handleEvent event = do
           updateW_{board: Grid.construct width height customSetTile }
 
     _ -> executeDefaultBehavior
+
 isGonnaExplode :: Tuple { x ∷ Int , y ∷ Int } Tile -> Boolean
 isGonnaExplode tile = case snd tile of 
                 Bomb{time} -> time == 1
                 _ -> false
-
      
 explode :: Grid Tile -> { x :: Int, y :: Int} -> List(Tuple Int { x :: Int, y :: Int})
 explode board {x, y} = bombBoom board {x, y} radiusConst Nil 
@@ -208,15 +203,12 @@ bombBoom board {x, y} radius bombsDone =
         Box -> (Tuple (distanceFromCords tile) tile) : Nil
         _ -> if not(radius_ == 0) then 
             Tuple (distanceFromCords tile) tile : go board_ {x: expX + xChange, y: expY + yChange} (radius_ - 1) enum bombsDonee
-
             else Nil
     distanceFromCords a = absoluteValue (a.x - x) + absoluteValue (a.y - y)
     absoluteValue i = if i < 0 then i * -1 else i
   in
     (Tuple 0 {x, y}) {- bomb cords -} : right <> left <> up <> down
     
-
-
 bombTick :: Tile -> Tile
 bombTick (Bomb {time}) = Bomb {time: time - 1}
 bombTick (Explosion{existTime, distance}) = if existTime < 0 then Empty else Explosion{existTime: existTime - 1, distance}
@@ -236,18 +228,16 @@ movePlayer2 = do
   let newPlayerPosition = { x: x + xDiff, y: y + yDiff}
   updateW_ { player2: Enemy{cords: newPlayerPosition, isOnRun: Timer{running, time: if not running then 0 else time}, lastSeen: cords}}
 
-
-
 enemyDirection ∷ ReactionM World (Tuple Boolean { xDiff ∷ Int , yDiff ∷ Int } )
 enemyDirection = do
   {board, player2: Enemy{cords: cords@{x:x1, y:y1},isOnRun: Timer{running}, lastSeen}} <- getW
   let possibleDirections = Array.filter (wayIsOK cords lastSeen board) directions
   let possibleTurns = Array.filter (not isATurn cords lastSeen) possibleDirections
-  if running && not Array.null possibleTurns then do
+  if isEmpty lastSeen board && (Array.null possibleDirections || (isBomb <<< fromMaybe Empty $ Grid.index board cords)) then do
+      pure $ Tuple running $ {xDiff: lastSeen.x - x1, yDiff: lastSeen.y - y1}
+  else if running && not Array.null possibleTurns then do
     coin <- liftEffect <<< randomInt 0 $ (Array.length possibleTurns) - 1
     pure $ Tuple false $ fromMaybe {xDiff: 0, yDiff: 0} $ possibleTurns !! coin
-  else if isEmpty lastSeen board && (Array.null possibleDirections || (isBomb <<< fromMaybe Empty $ Grid.index board {x: x1, y: y1})) then
-      pure $ Tuple running $ {xDiff: lastSeen.x - x1, yDiff: lastSeen.y - y1}
   else do
       coin <- liftEffect <<< randomInt 0 $ (Array.length possibleDirections) - 1
       pure $ Tuple running $ fromMaybe {xDiff: 0, yDiff: 0} $ possibleDirections !! coin
