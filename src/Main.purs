@@ -48,7 +48,13 @@ main = do
     reactor = reactorF board
   runReactor reactor { title: "Bomberman", width, height, widgets: [] }
 
-initialF board = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } }, board, tickCounter: 0 }
+enemies = 
+  [
+    { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } },
+    { cords: { x: width - 2, y: 1 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: 1 } },
+    { cords: { x: 1, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: 1, y: height - 2 } }
+  ]
+initialF board = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: enemies, board, tickCounter: 0 }
 
 reactorF board = { initial: initialF board, draw, handleEvent, isPaused: const false }
 
@@ -75,7 +81,7 @@ type Timer
 derive instance tileEq :: Eq Tile
 
 type World
-  = { player :: { cords :: Coordinates, hp :: Int }, player2 :: Enemy, board :: Grid Tile, tickCounter :: Int }
+  = { player :: { cords :: Coordinates, hp :: Int }, player2 :: Array Enemy, board :: Grid Tile, tickCounter :: Int }
 
 directions ∷ Array { xDiff ∷ Int, yDiff ∷ Int }
 directions = [ { xDiff: -1, yDiff: 0 }, { xDiff: 1, yDiff: 0 }, { xDiff: 0, yDiff: 1 }, { xDiff: 0, yDiff: -1 } ]
@@ -118,10 +124,11 @@ setTile point = do
     | otherwise = pure Empty
 
 draw :: World -> Drawing
-draw { player: { cords: cords1 }, player2: { cords }, board } = do
+draw { player: { cords: cords1 }, player2, board } = do
   drawGrid board drawTile
   fill blue400 $ tile cords1
-  fill red600 $ tile cords
+
+  fill red600 $ tile (_.coord <$> player2)
   where
   drawTile (Explosion { distance }) = Just (hslVal distance)
 
@@ -193,8 +200,13 @@ handleEvent event = do
         newWorld = Grid.construct width height customSetTile
       updateW_ { board: newWorld }
       when (isExplosion { x, y } newWorld && tickCounter `mod` 2 == 0) $ updateW_ { player: player { hp = hp - 1 } }
+      
       widget "healthTitle" (Section { title: "Health:" })
       widget "HP" (Label { content: toStringAs decimal hp })
+     
+      restartBoard <- liftEffect $ Grid.constructM width height setTile
+      when (hp < 1) 
+        (updateW_ (initialF restartBoard))
     _ -> executeDefaultBehavior
 
 isExplosion :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
@@ -254,21 +266,21 @@ movePlayer { xDiff, yDiff } = do
 possiblePos :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
 possiblePos position board = isEmpty position board || isExplosion position board
 
-movePlayer2 :: Reaction World
-movePlayer2 = do
-  running /\ { xDiff, yDiff } <- enemyDirection
-  { player2: { cords: cords@{ x, y }, isOnRun: isOnRun@{ time } } } <- getW
+
+movePlayer2 player2@{ cords: cords@{ x, y }, isOnRun: isOnRun@{ time } } = do
+  
+  running /\ { xDiff, yDiff } <- enemyDirection player2 -- :: Array (Reaction (Tuple Boolean {xDiff :: Int, yDiff :: Int}))
+
   let
     newPlayerPosition = { x: x + xDiff, y: y + yDiff }
   updateW_ { player2: { cords: newPlayerPosition, isOnRun: isOnRun { time = if not running then 0 else time }, lastSeen: cords } }
 
-enemyDirection ∷ ReactionM World (Tuple Boolean { xDiff ∷ Int, yDiff ∷ Int })
-enemyDirection = do
-  { board, player2: { cords: cords@{ x: x1, y: y1 }, isOnRun: { running }, lastSeen } } <- getW
+enemyDirection { cords: cords@{ x: x1, y: y1 }, isOnRun: { running }, lastSeen } = do
+  { board } <- getW
+  
   coin <- liftEffect $ randomInt 0 999999
   let
     possibleDirections = Array.filter (wayIsOK cords lastSeen board) directions
-  let
     possibleTurns = Array.filter (not isATurn cords lastSeen) possibleDirections
   pure
     $ if isEmpty lastSeen board && (Array.null possibleDirections || (isBomb $ fromMaybe Empty $ Grid.index board cords)) then do
@@ -279,7 +291,9 @@ enemyDirection = do
         running /\ (fromMaybe { xDiff: 0, yDiff: 0 } <<< index possibleDirections) (coin `mod` length possibleDirections)
 
 isATurn ∷ { x ∷ Int, y ∷ Int } → { x ∷ Int, y ∷ Int } → { xDiff ∷ Int, yDiff ∷ Int } → Boolean
-isATurn { x: currX, y: currY } { x: prevX, y: prevY } { xDiff, yDiff } = { x: currX + xDiff, y: currY + yDiff } == { x: prevX, y: prevY } || { x: currX + (xDiff * -1), y: currY + (yDiff * -1) } == { x: prevX, y: prevY }
+isATurn { x: currX, y: currY } { x: prevX, y: prevY } { xDiff, yDiff } = 
+  { x: currX + xDiff, y: currY + yDiff } == { x: prevX, y: prevY } || 
+    { x: currX + (xDiff * -1), y: currY + (yDiff * -1) } == { x: prevX, y: prevY }
 
 isEmpty :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
 isEmpty position board = Grid.index board position == Just Empty
