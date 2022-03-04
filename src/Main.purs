@@ -6,6 +6,7 @@ import Data.Array as Array
 import Data.Grid (Grid, Coordinates, enumerate)
 import Data.Grid as Grid
 import Data.Int (toNumber)
+import Data.Int (toStringAs, decimal)
 import Data.List (List(..), (:), null, filter, concat, fromFoldable, find)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Tuple (Tuple(..), fst, snd)
@@ -19,7 +20,8 @@ import Reactor.Events (Event(..))
 import Reactor.Graphics.Colors (blue400, gray300, gray600, gray500, hsl, red600, green700)
 import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
 import Reactor.Internal.Widget (Widget(..))
-import Reactor.Reaction (Reaction, ReactionM)
+import Reactor.Reaction (Reaction, ReactionM, widget)
+import Web.HTML.Event.EventTypes (offline)
 
 radiusConst :: Int
 radiusConst = 5
@@ -43,10 +45,19 @@ main :: Effect Unit
 main = do
   board <- Grid.constructM width height setTile
   let
-    initial = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } }, board, tickCounter: 0 }
+    reactor = reactorF board
+  runReactor reactor { title: "Bomberman", width, height, widgets: [] }
+
+initialF board = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } }, board, tickCounter: 0 }
+
+reactorF board = { initial: initialF board, draw, handleEvent, isPaused: const false }
+
+restart ∷ Effect Unit
+restart = do
+  board <- Grid.constructM width height setTile
   let
-    reactor = { initial, draw, handleEvent, isPaused: const false }
-  runReactor reactor { title: "Bomberman", width, height, widgets: [ "Sexy widget" /\ Section { title: "Sexy" } ] }
+    reactor = reactorF board
+  runReactor reactor { title: "Bomberman", width, height, widgets: [] }
 
 data Tile
   = Wall
@@ -140,7 +151,7 @@ draw { player: { cords: cords1 }, player2: { cords }, board } = do
 
 handleEvent :: Event -> Reaction World
 handleEvent event = do
-  { player: { cords: { x, y } }, board, player2: player2@{ cords, isOnRun: { running, time } }, tickCounter } <- getW
+  { player: player@{ cords: { x, y }, hp }, board, player2: player2@{ cords, isOnRun: { running, time } }, tickCounter } <- getW
   case event of
     KeyPress { key: "ArrowLeft" } -> do
       movePlayer { xDiff: -1, yDiff: 0 }
@@ -178,8 +189,18 @@ handleEvent event = do
         customSetTile tileCords = case find (\boomCords -> snd boomCords == tileCords) explodingCords of
           Nothing -> fromMaybe Empty $ Grid.index newBoard tileCords
           Just a -> Explosion { existTime: 120, distance: fst a } --fst a is distance from bomb
-      updateW_ { board: Grid.construct width height customSetTile }
+      let
+        newWorld = Grid.construct width height customSetTile
+      updateW_ { board: newWorld }
+      when (isExplosion { x, y } newWorld && tickCounter `mod` 2 == 0) $ updateW_ { player: player { hp = hp - 1 } }
+      widget "healthTitle" (Section { title: "Health:" })
+      widget "HP" (Label { content: toStringAs decimal hp })
     _ -> executeDefaultBehavior
+
+isExplosion :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
+isExplosion position board = case Grid.index board position of
+  Just (Explosion {}) -> true
+  _ -> false
 
 isGonnaExplode :: Tuple { x ∷ Int, y ∷ Int } Tile -> Boolean
 isGonnaExplode tile = case snd tile of
@@ -228,7 +249,10 @@ movePlayer { xDiff, yDiff } = do
   { player: player@{ cords: { x, y } }, board } <- getW
   let
     newPlayerPosition = { x: x + xDiff, y: y + yDiff }
-  when (isEmpty newPlayerPosition board) $ updateW_ { player: player { cords = newPlayerPosition } }
+  when (possiblePos newPlayerPosition board) $ updateW_ { player: player { cords = newPlayerPosition } }
+
+possiblePos :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
+possiblePos position board = isEmpty position board || isExplosion position board
 
 movePlayer2 :: Reaction World
 movePlayer2 = do
