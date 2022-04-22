@@ -1,8 +1,10 @@
 module Main where
 
+import Debug
 import Prelude
-import Data.Array ((!!), length, index)
+import Data.Array (foldl, index, length, (!!), (..), zip, updateAt)
 import Data.Array as Array
+import Data.Foldable (for_)
 import Data.Grid (Grid, Coordinates, enumerate)
 import Data.Grid as Grid
 import Data.Int (toNumber)
@@ -20,7 +22,7 @@ import Reactor.Events (Event(..))
 import Reactor.Graphics.Colors (blue400, gray300, gray600, gray500, hsl, red600, green700)
 import Reactor.Graphics.Drawing (Drawing, drawGrid, fill, tile)
 import Reactor.Internal.Widget (Widget(..))
-import Reactor.Reaction (Reaction, ReactionM, widget)
+import Reactor.Reaction (ReactionM, Reaction, widget)
 import Web.HTML.Event.EventTypes (offline)
 
 radiusConst :: Int
@@ -48,7 +50,14 @@ main = do
     reactor = reactorF board
   runReactor reactor { title: "Bomberman", width, height, widgets: [] }
 
-initialF board = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } }, board, tickCounter: 0 }
+enemies ∷ Array Enemy
+enemies =
+  [ { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } }
+  , { cords: { x: width - 2, y: 1 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: 1 } }
+  , { cords: { x: 1, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: 1, y: height - 2 } }
+  ]
+
+initialF board = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: enemies, board, tickCounter: 0 }
 
 reactorF board = { initial: initialF board, draw, handleEvent, isPaused: const false }
 
@@ -75,7 +84,7 @@ type Timer
 derive instance tileEq :: Eq Tile
 
 type World
-  = { player :: { cords :: Coordinates, hp :: Int }, player2 :: Enemy, board :: Grid Tile, tickCounter :: Int }
+  = { player :: { cords :: Coordinates, hp :: Int }, player2 :: Array Enemy, board :: Grid Tile, tickCounter :: Int }
 
 directions ∷ Array { xDiff ∷ Int, yDiff ∷ Int }
 directions = [ { xDiff: -1, yDiff: 0 }, { xDiff: 1, yDiff: 0 }, { xDiff: 0, yDiff: 1 }, { xDiff: 0, yDiff: -1 } ]
@@ -97,8 +106,8 @@ isWall { x, y } =
 
 isBox :: Coordinates -> Effect Boolean
 isBox { x, y } = do
-  coin <- randomInt 0 4
-  pure $ coin /= 0 && (not $ (x < 4 || x >= width - 4) && (y < 4 || y >= height - 4))
+  coin <- randomInt 0 2
+  pure $ coin < 1 && (not $ (x < 4 || x >= width - 4) && (y < 4 || y >= height - 4))
 
 evenWallPlacement :: Boolean -> Int -> Boolean
 evenWallPlacement true currentIndex = currentIndex `mod` 2 == 0
@@ -117,11 +126,16 @@ setTile point = do
     | isBoxBool = pure Box
     | otherwise = pure Empty
 
+drawEnemy ∷ Enemy -> Drawing
+drawEnemy player2 = do
+  fill red600 $ tile player2.cords
+
 draw :: World -> Drawing
-draw { player: { cords: cords1 }, player2: { cords }, board } = do
+draw { player: { cords: cords1 }, player2, board } = do
   drawGrid board drawTile
   fill blue400 $ tile cords1
-  fill red600 $ tile cords
+  for_ player2 drawEnemy
+  pure unit
   where
   drawTile (Explosion { distance }) = Just (hslVal distance)
 
@@ -149,9 +163,31 @@ draw { player: { cords: cords1 }, player2: { cords }, board } = do
     in
       hsl hue saturation light
 
+handleP2Event ∷ Tuple Enemy Int -> Reaction World
+handleP2Event (player2@{ cords, isOnRun: { running, time } } /\ i) = do
+  { board, tickCounter, player2: player2arr } <- getW
+  coin <- liftEffect $ randomInt 0 999999
+  let
+    isOnRun = { running: (time > 0), time: time - 1 }
+
+    arr = fromMaybe [] $ updateAt i (player2 { isOnRun = isOnRun }) player2arr
+  updateW_ { player2: arr }
+  when (5 `mod` 5 < 4 && tickCounter `mod` (if running then runningSpeed else walkingSpeed) == 0) $ movePlayer2 (player2 /\ i) --p = 0,8
+  if coin `mod` 100 < 69 && tickCounter `mod` 300 == 0 then --p = 0,7
+    let
+      bombPlanted = Grid.updateAt' cords (Bomb { time: timer }) $ board
+
+      newPlayer2 = player2 { isOnRun = { running: true, time: radiusConst * runningSpeed } }
+
+      newArr = fromMaybe [] $ updateAt i newPlayer2 player2arr
+    in
+      updateW_ { board: bombPlanted, player2: newArr }
+  else
+    pure unit
+
 handleEvent :: Event -> Reaction World
 handleEvent event = do
-  { player: player@{ cords: { x, y }, hp }, board, player2: player2@{ cords, isOnRun: { running, time } }, tickCounter } <- getW
+  { player: player@{ cords: { x, y }, hp }, board, player2, tickCounter } <- getW
   case event of
     KeyPress { key: "ArrowLeft" } -> do
       movePlayer { xDiff: -1, yDiff: 0 }
@@ -166,35 +202,28 @@ handleEvent event = do
         bombPlanted = Grid.updateAt' { x, y } (Bomb { time: timer }) board
       updateW_ { board: bombPlanted }
     Tick {} -> do
-      coin <- liftEffect $ randomInt 0 999999 --hehe; abychom mohli použít jeden coin na více věcí, dělám to takhle.
+      updateW_ { board: bombTick <$> board, tickCounter: tickCounter + 1 }
       let
-        isOnRun = { running: (time > 0), time: time - 1 }
-      updateW_ { board: bombTick <$> board, tickCounter: tickCounter + 1, player2: player2 { isOnRun = isOnRun } }
-      when (coin `mod` 5 < 4 && tickCounter `mod` (if running then runningSpeed else walkingSpeed) == 0) movePlayer2 --p = 0,8
-      if coin `mod` 100 < 69 && tickCounter `mod` 300 == 0 then --p = 0,7
-        let
-          bombPlanted = Grid.updateAt' cords (Bomb { time: timer }) board
-
-          newPlayer2 = player2 { isOnRun = { running: true, time: radiusConst * runningSpeed } }
-        in
-          updateW_ { board: bombPlanted, player2: newPlayer2 }
-      else
-        pure unit
+        arrr = player2 `zip` (0 .. length player2)
+      for_ arrr handleP2Event
+      restartBoard <- liftEffect $ Grid.constructM width height setTile
       { board: newBoard } <- getW --just to be sure we are working with the most recent board
       let
         explodingBombs = filter isGonnaExplode $ (fromFoldable <<< enumerate) newBoard
-      let
+
         explodingCords = concat $ map (\bomb -> explode newBoard (fst bomb)) explodingBombs
-      let
+
         customSetTile tileCords = case find (\boomCords -> snd boomCords == tileCords) explodingCords of
           Nothing -> fromMaybe Empty $ Grid.index newBoard tileCords
           Just a -> Explosion { existTime: 120, distance: fst a } --fst a is distance from bomb
-      let
+
         newWorld = Grid.construct width height customSetTile
       updateW_ { board: newWorld }
       when (isExplosion { x, y } newWorld && tickCounter `mod` 2 == 0) $ updateW_ { player: player { hp = hp - 1 } }
       widget "healthTitle" (Section { title: "Health:" })
       widget "HP" (Label { content: toStringAs decimal hp })
+      when (hp < 1)
+        (updateW_ (initialF restartBoard))
     _ -> executeDefaultBehavior
 
 isExplosion :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
@@ -203,9 +232,9 @@ isExplosion position board = case Grid.index board position of
   _ -> false
 
 isGonnaExplode :: Tuple { x ∷ Int, y ∷ Int } Tile -> Boolean
-isGonnaExplode tile = case snd tile of
-  Bomb { time } -> time == 1
-  _ -> false
+isGonnaExplode (_ /\ Bomb { time }) = time == 1
+
+isGonnaExplode _ = false
 
 explode :: Grid Tile -> { x :: Int, y :: Int } -> List (Tuple Int { x :: Int, y :: Int })
 explode board { x, y } = bombBoom board { x, y } radiusConst Nil
@@ -254,21 +283,23 @@ movePlayer { xDiff, yDiff } = do
 possiblePos :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
 possiblePos position board = isEmpty position board || isExplosion position board
 
-movePlayer2 :: Reaction World
-movePlayer2 = do
-  running /\ { xDiff, yDiff } <- enemyDirection
-  { player2: { cords: cords@{ x, y }, isOnRun: isOnRun@{ time } } } <- getW
+movePlayer2 ∷ Tuple Enemy Int → Reaction World
+movePlayer2 (player2@{ cords: cords@{ x, y }, isOnRun: isOnRun@{ time } } /\ i) = do
+  { player2: player2arr } <- getW
+  running /\ { xDiff, yDiff } <- enemyDirection player2 -- :: Array (Reaction (Tuple Boolean {xDiff :: Int, yDiff :: Int}))
   let
     newPlayerPosition = { x: x + xDiff, y: y + yDiff }
-  updateW_ { player2: { cords: newPlayerPosition, isOnRun: isOnRun { time = if not running then 0 else time }, lastSeen: cords } }
 
-enemyDirection ∷ ReactionM World (Tuple Boolean { xDiff ∷ Int, yDiff ∷ Int })
-enemyDirection = do
-  { board, player2: { cords: cords@{ x: x1, y: y1 }, isOnRun: { running }, lastSeen } } <- getW
+    newArr = fromMaybe [] $ updateAt i { cords: newPlayerPosition, isOnRun: isOnRun { time = if not running then 0 else time }, lastSeen: cords } player2arr
+  updateW_ { player2: newArr }
+
+enemyDirection ∷ ∀ (t337 ∷ Row Type). Enemy → ReactionM { board ∷ Grid Tile | t337 } (Tuple Boolean { xDiff ∷ Int, yDiff ∷ Int })
+enemyDirection { cords: cords@{ x: x1, y: y1 }, isOnRun: { running }, lastSeen } = do
+  { board } <- getW
   coin <- liftEffect $ randomInt 0 999999
   let
     possibleDirections = Array.filter (wayIsOK cords lastSeen board) directions
-  let
+
     possibleTurns = Array.filter (not isATurn cords lastSeen) possibleDirections
   pure
     $ if isEmpty lastSeen board && (Array.null possibleDirections || (isBomb $ fromMaybe Empty $ Grid.index board cords)) then do
@@ -279,7 +310,10 @@ enemyDirection = do
         running /\ (fromMaybe { xDiff: 0, yDiff: 0 } <<< index possibleDirections) (coin `mod` length possibleDirections)
 
 isATurn ∷ { x ∷ Int, y ∷ Int } → { x ∷ Int, y ∷ Int } → { xDiff ∷ Int, yDiff ∷ Int } → Boolean
-isATurn { x: currX, y: currY } { x: prevX, y: prevY } { xDiff, yDiff } = { x: currX + xDiff, y: currY + yDiff } == { x: prevX, y: prevY } || { x: currX + (xDiff * -1), y: currY + (yDiff * -1) } == { x: prevX, y: prevY }
+isATurn { x: currX, y: currY } { x: prevX, y: prevY } { xDiff, yDiff } =
+  { x: currX + xDiff, y: currY + yDiff } == { x: prevX, y: prevY }
+    || { x: currX + (xDiff * -1), y: currY + (yDiff * -1) }
+    == { x: prevX, y: prevY }
 
 isEmpty :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
 isEmpty position board = Grid.index board position == Just Empty
