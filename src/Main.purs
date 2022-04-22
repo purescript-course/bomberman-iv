@@ -25,49 +25,6 @@ import Reactor.Internal.Widget (Widget(..))
 import Reactor.Reaction (ReactionM, Reaction, widget)
 import Web.HTML.Event.EventTypes (offline)
 
-radiusConst :: Int
-radiusConst = 5
-
-width :: Int
-width = 18
-
-height :: Int
-height = 18
-
-timer :: Int
-timer = 200
-
-walkingSpeed ∷ Int
-walkingSpeed = 35
-
-runningSpeed :: Int
-runningSpeed = walkingSpeed / 3 * 2
-
-main :: Effect Unit
-main = do
-  board <- Grid.constructM width height setTile
-  let
-    reactor = reactorF board
-  runReactor reactor { title: "Bomberman", width, height, widgets: [] }
-
-enemies ∷ Array Enemy
-enemies =
-  [ { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } }
-  , { cords: { x: width - 2, y: 1 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: 1 } }
-  , { cords: { x: 1, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: 1, y: height - 2 } }
-  ]
-
-initialF board = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: enemies, board, tickCounter: 0 }
-
-reactorF board = { initial: initialF board, draw, handleEvent, isPaused: const false }
-
-restart ∷ Effect Unit
-restart = do
-  board <- Grid.constructM width height setTile
-  let
-    reactor = reactorF board
-  runReactor reactor { title: "Bomberman", width, height, widgets: [] }
-
 data Tile
   = Wall
   | Box
@@ -86,8 +43,51 @@ derive instance tileEq :: Eq Tile
 type World
   = { player :: { cords :: Coordinates, hp :: Int }, player2 :: Array Enemy, board :: Grid Tile, tickCounter :: Int }
 
+radiusConst :: Int
+radiusConst = 5
+
+width :: Int
+width = 18
+
+height :: Int
+height = 18
+
+timer :: Int
+timer = 200
+
+walkingSpeed ∷ Int
+walkingSpeed = 35
+
+runningSpeed :: Int
+runningSpeed = walkingSpeed / 3 * 2
+
+enemies ∷ Array Enemy
+enemies =
+  [ { cords: { x: width - 2, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: height - 2 } }
+  , { cords: { x: width - 2, y: 1 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: width - 2, y: 1 } }
+  , { cords: { x: 1, y: height - 2 }, isOnRun: { running: false, time: 0 }, lastSeen: { x: 1, y: height - 2 } }
+  ]
+
 directions ∷ Array { xDiff ∷ Int, yDiff ∷ Int }
 directions = [ { xDiff: -1, yDiff: 0 }, { xDiff: 1, yDiff: 0 }, { xDiff: 0, yDiff: 1 }, { xDiff: 0, yDiff: -1 } ]
+
+restart ∷ Effect Unit
+restart = do
+  board <- Grid.constructM width height setTile
+  let
+    reactor = reactorF board
+  runReactor reactor { title: "Bomberman", width, height, widgets: [] }
+
+initialF board = { player: { cords: { x: 1, y: 1 }, hp: 100 }, player2: enemies, board, tickCounter: 0 }
+
+reactorF board = { initial: initialF board, draw, handleEvent, isPaused: const false }
+
+main :: Effect Unit
+main = do
+  board <- Grid.constructM width height setTile
+  let
+    reactor = reactorF board
+  runReactor reactor { title: "Bomberman", width, height, widgets: [] }
 
 isWall :: Coordinates -> Boolean
 isWall { x, y } =
@@ -126,64 +126,62 @@ setTile point = do
     | isBoxBool = pure Box
     | otherwise = pure Empty
 
-drawEnemy ∷ Enemy -> Drawing
-drawEnemy player2 = do
-  fill red600 $ tile player2.cords
-
 draw :: World -> Drawing
 draw { player: { cords: cords1 }, player2, board } = do
   drawGrid board drawTile
   fill blue400 $ tile cords1
-  for_ player2 drawEnemy
+  for_ player2 (\enemy -> do fill red600 $ tile enemy.cords)
   pure unit
   where
   drawTile (Explosion { distance }) = Just (hslVal distance)
 
-  drawTile Empty = Just gray300
+  drawTile Empty = Nothing
 
-  drawTile (Bomb { time }) = if time - 1 >= timer / 3 || (time - 1) `mod` 10 > 4 then Just gray500 else Just red600
+  drawTile (Bomb { time }) = if time - 1 >= timer / 3 || (time - 1) `mod` 10 > 4 then Just gray500 else Just red600 -- flickering
 
   drawTile Wall = Just gray600
 
   drawTile Box = Just green700
 
-  hslVal a =
+  hslVal distance =
     let
-      b = toNumber a
+      distNum = toNumber distance
 
       exRadiusNum = toNumber radiusConst
 
       division = 4.6416 / exRadiusNum
 
-      hue = 60.0 - sqrt (60.0 * 60.0 / exRadiusNum * b)
+      hue = 60.0 - sqrt (60.0 * 60.0 / exRadiusNum * distNum)
 
-      saturation = (100.0 - ((division * b) * pow (division * b) 2.0)) / 100.0
+      saturation = (100.0 - ((division * distNum) * pow (division * distNum) 2.0)) / 100.0
 
-      light = (50.0 - sqrt (18.0 * 18.0 / exRadiusNum * b)) / 100.0
+      light = (50.0 - sqrt (18.0 * 18.0 / exRadiusNum * distNum)) / 100.0
     in
       hsl hue saturation light
 
-handleP2Event ∷ Tuple Enemy Int -> Reaction World
-handleP2Event (player2@{ cords, isOnRun: { running, time } } /\ i) = do
+handleP2Events ∷ Tuple Enemy Int -> Reaction World
+handleP2Events (player2@{ cords, isOnRun: { running, time } } /\ i) = do
   { board, tickCounter, player2: player2arr } <- getW
   coin <- liftEffect $ randomInt 0 999999
   let
     isOnRun = { running: (time > 0), time: time - 1 }
 
     arr = fromMaybe [] $ updateAt i (player2 { isOnRun = isOnRun }) player2arr
+
+    moveDelay = (if running then runningSpeed else walkingSpeed) + i
+
+    bombDelay = 199 + i * 50
   updateW_ { player2: arr }
-  when (5 `mod` 5 < 4 && tickCounter `mod` (if running then runningSpeed else walkingSpeed) == 0) $ movePlayer2 (player2 /\ i) --p = 0,8
-  if coin `mod` 100 < 69 && tickCounter `mod` 300 == 0 then --p = 0,7
-    let
-      bombPlanted = Grid.updateAt' cords (Bomb { time: timer }) $ board
+  when (coin `mod` 5 < 4 && tickCounter `mod` moveDelay == 0) $ movePlayer2 (player2 /\ i) --p = 0,8
+  when (coin `mod` 100 < 69 && tickCounter `mod` bombDelay == 0) --p = 0,7
+    $ let
+        bombPlanted = Grid.updateAt' cords (Bomb { time: timer }) board
 
-      newPlayer2 = player2 { isOnRun = { running: true, time: radiusConst * runningSpeed } }
+        runningPlayer2 = player2 { isOnRun = { running: true, time: radiusConst * runningSpeed } }
 
-      newArr = fromMaybe [] $ updateAt i newPlayer2 player2arr
-    in
-      updateW_ { board: bombPlanted, player2: newArr }
-  else
-    pure unit
+        newP2Arr = fromMaybe [] $ updateAt i runningPlayer2 player2arr
+      in
+        updateW_ { board: bombPlanted, player2: newP2Arr }
 
 handleEvent :: Event -> Reaction World
 handleEvent event = do
@@ -197,16 +195,10 @@ handleEvent event = do
       movePlayer { xDiff: 0, yDiff: 1 }
     KeyPress { key: "ArrowUp" } -> do
       movePlayer { xDiff: 0, yDiff: -1 }
-    KeyPress { key: " " } -> do
-      let
-        bombPlanted = Grid.updateAt' { x, y } (Bomb { time: timer }) board
-      updateW_ { board: bombPlanted }
+    KeyPress { key: " " } -> updateW_ { board: Grid.updateAt' { x, y } (Bomb { time: timer }) board }
     Tick {} -> do
-      updateW_ { board: bombTick <$> board, tickCounter: tickCounter + 1 }
-      let
-        arrr = player2 `zip` (0 .. length player2)
-      for_ arrr handleP2Event
-      restartBoard <- liftEffect $ Grid.constructM width height setTile
+      updateW_ { board: bombTick <$> board, tickCounter: tickCounter + 1 } -- Bombs and explosions tick
+      for_ (player2 `zip` (0 .. length player2)) handleP2Events --Enemies move and plant bombs
       { board: newBoard } <- getW --just to be sure we are working with the most recent board
       let
         explodingBombs = filter isGonnaExplode $ (fromFoldable <<< enumerate) newBoard
@@ -215,31 +207,24 @@ handleEvent event = do
 
         customSetTile tileCords = case find (\boomCords -> snd boomCords == tileCords) explodingCords of
           Nothing -> fromMaybe Empty $ Grid.index newBoard tileCords
-          Just a -> Explosion { existTime: 120, distance: fst a } --fst a is distance from bomb
+          Just a -> Explosion { existTime: 120, distance: fst a } --'fst a' is distance from bomb
 
         newWorld = Grid.construct width height customSetTile
-      updateW_ { board: newWorld }
+      updateW_ { board: newWorld } -- all bombs exploded
       when (isExplosion { x, y } newWorld && tickCounter `mod` 2 == 0) $ updateW_ { player: player { hp = hp - 1 } }
       widget "healthTitle" (Section { title: "Health:" })
       widget "HP" (Label { content: toStringAs decimal hp })
-      when (hp < 1)
-        (updateW_ (initialF restartBoard))
+      when (hp < 1) do
+        restartBoard <- liftEffect $ Grid.constructM width height setTile
+        updateW_ (initialF restartBoard)
     _ -> executeDefaultBehavior
 
-isExplosion :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
-isExplosion position board = case Grid.index board position of
-  Just (Explosion {}) -> true
-  _ -> false
-
-isGonnaExplode :: Tuple { x ∷ Int, y ∷ Int } Tile -> Boolean
-isGonnaExplode (_ /\ Bomb { time }) = time == 1
-
-isGonnaExplode _ = false
-
 explode :: Grid Tile -> { x :: Int, y :: Int } -> List (Tuple Int { x :: Int, y :: Int })
+--Helper function for bombBoom
 explode board { x, y } = bombBoom board { x, y } radiusConst Nil
 
 bombBoom ∷ Grid Tile → { x ∷ Int, y ∷ Int } → Int → List { x ∷ Int, y ∷ Int } → List (Tuple Int { x ∷ Int, y ∷ Int })
+--Spreads explosions
 bombBoom board { x, y } radius bombsDone =
   let
     right = go board { x: x + 1, y } radius { xChange: 1, yChange: 0 } bombsDone
@@ -267,6 +252,7 @@ bombBoom board { x, y } radius bombsDone =
     (Tuple 0 { x, y }) {- bomb cords -} : right <> left <> up <> down
 
 bombTick :: Tile -> Tile
+--Ticks bombs and explosions (and deletes them if necessary)
 bombTick (Bomb { time }) = Bomb { time: time - 1 }
 
 bombTick (Explosion ex@{ existTime }) = if existTime < 0 then Empty else Explosion ex { existTime = existTime - 1 }
@@ -278,10 +264,7 @@ movePlayer { xDiff, yDiff } = do
   { player: player@{ cords: { x, y } }, board } <- getW
   let
     newPlayerPosition = { x: x + xDiff, y: y + yDiff }
-  when (possiblePos newPlayerPosition board) $ updateW_ { player: player { cords = newPlayerPosition } }
-
-possiblePos :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
-possiblePos position board = isEmpty position board || isExplosion position board
+  when (freeTile newPlayerPosition board) $ updateW_ { player: player { cords = newPlayerPosition } }
 
 movePlayer2 ∷ Tuple Enemy Int → Reaction World
 movePlayer2 (player2@{ cords: cords@{ x, y }, isOnRun: isOnRun@{ time } } /\ i) = do
@@ -302,7 +285,7 @@ enemyDirection { cords: cords@{ x: x1, y: y1 }, isOnRun: { running }, lastSeen }
 
     possibleTurns = Array.filter (not isATurn cords lastSeen) possibleDirections
   pure
-    $ if isEmpty lastSeen board && (Array.null possibleDirections || (isBomb $ fromMaybe Empty $ Grid.index board cords)) then do
+    $ if isEmpty lastSeen board && (Array.null possibleDirections || (tileIsBomb $ fromMaybe Empty $ Grid.index board cords)) then do
         running /\ { xDiff: lastSeen.x - x1, yDiff: lastSeen.y - y1 }
       else if running && not Array.null possibleTurns then
         false /\ (fromMaybe { xDiff: 0, yDiff: 0 } <<< index possibleTurns) (coin `mod` length possibleTurns)
@@ -310,6 +293,7 @@ enemyDirection { cords: cords@{ x: x1, y: y1 }, isOnRun: { running }, lastSeen }
         running /\ (fromMaybe { xDiff: 0, yDiff: 0 } <<< index possibleDirections) (coin `mod` length possibleDirections)
 
 isATurn ∷ { x ∷ Int, y ∷ Int } → { x ∷ Int, y ∷ Int } → { xDiff ∷ Int, yDiff ∷ Int } → Boolean
+--Tells if a way is a turn based on last tile
 isATurn { x: currX, y: currY } { x: prevX, y: prevY } { xDiff, yDiff } =
   { x: currX + xDiff, y: currY + yDiff } == { x: prevX, y: prevY }
     || { x: currX + (xDiff * -1), y: currY + (yDiff * -1) }
@@ -318,9 +302,14 @@ isATurn { x: currX, y: currY } { x: prevX, y: prevY } { xDiff, yDiff } =
 isEmpty :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
 isEmpty position board = Grid.index board position == Just Empty
 
-isBomb :: Tile -> Boolean
-isBomb tile = case tile of
-  Bomb {} -> true
+tileIsBomb :: Tile -> Boolean
+tileIsBomb (Bomb {}) = true
+
+tileIsBomb _ = false
+
+isExplosion :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
+isExplosion position board = case Grid.index board position of
+  Just (Explosion {}) -> true
   _ -> false
 
 wayIsOK ∷ { x ∷ Int, y ∷ Int } → { x ∷ Int, y ∷ Int } → Grid Tile → { xDiff ∷ Int, yDiff ∷ Int } → Boolean
@@ -329,3 +318,11 @@ wayIsOK { x, y } lastSeen board { xDiff, yDiff } =
     false
   else
     isEmpty { x: x + xDiff, y: y + yDiff } board
+
+freeTile :: { x :: Int, y :: Int } -> Grid Tile -> Boolean
+freeTile position board = isEmpty position board || isExplosion position board
+
+isGonnaExplode :: Tuple { x ∷ Int, y ∷ Int } Tile -> Boolean
+isGonnaExplode (_ /\ Bomb { time }) = time == 1
+
+isGonnaExplode _ = false
