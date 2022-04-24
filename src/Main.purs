@@ -6,8 +6,7 @@ import Data.Array as Array
 import Data.Foldable (for_)
 import Data.Grid (Grid, Coordinates, enumerate)
 import Data.Grid as Grid
-import Data.Int (toNumber)
-import Data.Int (toStringAs, decimal)
+import Data.Int (toNumber, toStringAs, decimal)
 import Data.List (List(..), (:), null, filter, concat, fromFoldable, find)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Tuple (Tuple(..), fst, snd)
@@ -60,7 +59,7 @@ runningSpeed :: Int
 runningSpeed = walkingSpeed / 3 * 2
 
 lightRange :: Int
-lightRange = 7
+lightRange = 5
 
 enemies ∷ Array Enemy
 enemies =
@@ -140,7 +139,7 @@ draw { player: { cords: cords1 }, player2, board, mousePos } = do
 
   drawTile tileCoords (Bomb { time }) =
     if time - 1 >= timer / 3 || (time - 1) `mod` 10 > 4 then
-      Just $ hsl 0.0 0.286 (0.6569 * (getLightValue tileCoords mousePos))
+      Just $ hsl 0.0 0.0 (0.6569 * (getLightValue tileCoords mousePos))
     else
       Just $ hsl 1.37 0.7719 (0.5529 * (getLightValue tileCoords mousePos)) -- flickering
 
@@ -167,6 +166,8 @@ draw { player: { cords: cords1 }, player2, board, mousePos } = do
 getLightValue :: Coordinates -> Coordinates -> Number
 getLightValue { x, y } { x: mX, y: mY } = toNumber (lightRange * lightRange - ((x - mX) * (x - mX) + (y - mY) * (y - mY))) / toNumber (lightRange * lightRange)
 
+--if ((x - mX) * (x - mX) <= -4 * (y - mY)) then 1.0 / (sqrt $ sqrt $ sqrt $ (toNumber $ absoluteValue $ x - mX) + 1.0) else 0.0
+--toNumber (lightRange * lightRange - ((x - mX) * (x - mX) + (y - mY) * (y - mY))) / toNumber (lightRange * lightRange)
 handleP2Events ∷ Tuple Enemy Int -> Reaction World
 handleP2Events (player2@{ cords, isOnRun: { running, time } } /\ i) = do
   { board, tickCounter, player2: player2arr } <- getW
@@ -206,23 +207,25 @@ handleEvent event = do
     KeyPress { key: " " } -> updateW_ { board: Grid.updateAt' { x, y } (Bomb { time: timer }) board }
     Mouse { position: { x: mX, y: mY } } -> if (tickCounter `mod` 4) == 0 then updateW_ { mousePos: { x: mX, y: mY } } else executeDefaultBehavior
     Tick {} -> do
-      updateW_ { board: bombTick <$> board, tickCounter: tickCounter + 1 } -- Bombs and explosions tick
       for_ (player2 `zip` (0 .. length player2)) handleP2Events --Enemies move and plant bombs
-      { board: newBoard } <- getW --just to be sure we are working with the most recent board
+      { board: curBoard } <- getW
       let
-        explodingBombs = filter isGonnaExplode $ (fromFoldable <<< enumerate) newBoard
+        explodingBombs = filter isGonnaExplode $ (fromFoldable <<< enumerate) curBoard
 
-        explodingCords = concat $ map (\bomb -> explode newBoard (fst bomb)) explodingBombs
+        explodingCords = concat $ map (\bomb -> explode curBoard (fst bomb)) explodingBombs
 
         customSetTile tileCords = case find (\boomCords -> snd boomCords == tileCords) explodingCords of
-          Nothing -> fromMaybe Empty $ Grid.index newBoard tileCords
+          Nothing -> fromMaybe Empty $ Grid.index curBoard tileCords
           Just a -> Explosion { existTime: 120, distance: fst a } --'fst a' is distance from bomb
 
         newWorld = Grid.construct width height customSetTile
-      updateW_ { board: newWorld } -- all bombs exploded
+      updateW_ { board: bombTick <$> newWorld, tickCounter: tickCounter + 1 } -- all bombs exploded
+      --DMG
       when (isExplosion { x, y } newWorld && tickCounter `mod` 2 == 0) $ updateW_ { player: player { hp = hp - 1 } }
+      --Widgets
       widget "healthTitle" (Section { title: "Health:" })
       widget "HP" (Label { content: toStringAs decimal hp })
+      --Restart
       when (hp < 1) do
         restartBoard <- liftEffect $ Grid.constructM width height setTile
         updateW_ (initialF restartBoard)
@@ -255,8 +258,6 @@ bombBoom board { x, y } radius bombsDone =
           Nil
 
     distanceFromCords a = absoluteValue (a.x - x) + absoluteValue (a.y - y)
-
-    absoluteValue i = if i < 0 then i * -1 else i
   in
     (Tuple 0 { x, y }) {- bomb cords -} : right <> left <> up <> down
 
@@ -335,3 +336,6 @@ isGonnaExplode :: Tuple { x ∷ Int, y ∷ Int } Tile -> Boolean
 isGonnaExplode (_ /\ Bomb { time }) = time == 1
 
 isGonnaExplode _ = false
+
+absoluteValue ∷ Int → Int
+absoluteValue i = if i < 0 then i * -1 else i
